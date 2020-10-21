@@ -2,6 +2,7 @@ import React from 'react';
 import './App.css';
 import { Box, Table, TableBody, TableCell, TableContainer,
          TableHead, TableRow, Paper } from '@material-ui/core';
+import './firebase.js'
 
 const nil = {
   name: "Nilörngruppen B",
