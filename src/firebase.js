@@ -36,6 +36,49 @@ var data_entry = {
     };
 
 
+
+{
+  "instrument": 0,
+  "reports": [
+    {
+      "year": 0,
+      "period": 0,
+      "revenues": 0,
+      "gross_Income": 0,
+      "operating_Income": 0,
+      "profit_Before_Tax": 0,
+      "profit_To_Equity_Holders": 0,
+      "earnings_Per_Share": 0,
+      "number_Of_Shares": 0,
+      "dividend": 0,
+      "intangible_Assets": 0,
+      "tangible_Assets": 0,
+      "financial_Assets": 0,
+      "non_Current_Assets": 0,
+      "cash_And_Equivalents": 0,
+      "current_Assets": 0,
+      "total_Assets": 0,
+      "total_Equity": 0,
+      "non_Current_Liabilities": 0,
+      "current_Liabilities": 0,
+      "total_Liabilities_And_Equity": 0,
+      "net_Debt": 0,
+      "cash_Flow_From_Operating_Activities": 0,
+      "cash_Flow_From_Investing_Activities": 0,
+      "cash_Flow_From_Financing_Activities": 0,
+      "cash_Flow_For_The_Year": 0,
+      "free_Cash_Flow": 0,
+      "stock_Price_Average": 0,
+      "stock_Price_High": 0,
+      "stock_Price_Low": 0,
+      "report_Start_Date": "2020-10-21T10:27:18.638Z",
+      "report_End_Date": "2020-10-21T10:27:18.638Z",
+      "broken_Fiscal_Year": true
+    }
+  ]
+}
+
+
 const production_states = {
     STATE_FLASH_LAN7801: 'STATE_FLASH_LAN7801',
     STATE_FLASH_STM32: 'STATE_FLASH_STM32',
