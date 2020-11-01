@@ -3,6 +3,13 @@ import { Chart } from "react-google-charts";
 import "./App.css";
 import {
   Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  TextField,
   Table,
   TableBody,
   TableCell,
@@ -24,42 +31,88 @@ const config = {
   storageBucket: process.env.REACT_APP_STORAGE_BUCKET,
   messagingSenderId: process.env.REACT_APP_MESSAGING_SENDER_ID,
 };
-
 firebase.initializeApp(config);
+const auth = firebase.auth();
 
-let auth = firebase.auth();
-auth
-  .getRedirectResult()
-  .then((result) => {
-    console.log("AUTH OK", result);
-  })
-  .catch((error) => {
-    console.log("AUTH ERROR", error);
-  });
+function LoginDialog(props) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
-auth.onAuthStateChanged((user) => {
-  if (user) {
-    console.log("AUTH", user.email, user.uid);
-  } else {
-    console.log("NO AUTH");
-  }
-});
+  const okClicked = () => {
+    auth
+      .signInWithEmailAndPassword(email, password)
+      .then(() => setOpen(false))
+      .catch((error) => {
+        alert(error.message);
+      });
+  };
 
-function login() {
-  let provider = new firebase.auth.GoogleAuthProvider();
-  auth.signInWithRedirect(provider);
+  const googleClicked = () => {
+    let provider = new firebase.auth.GoogleAuthProvider();
+    auth.signInWithRedirect(provider);
+  };
+
+  const logoutClicked = () => {
+    auth.signOut();
+    props.onLogout();
+  };
+
+  return (
+    <div>
+      {!props.isLoggedIn && (
+        <Button
+          variant="outlined"
+          color="primary"
+          onClick={() => setOpen(true)}
+        >
+          Login
+        </Button>
+      )}
+      {props.loginName && <span>Logged in in as {props.loginName}</span>}
+      {props.isLoggedIn && (
+        <Button variant="outlined" color="primary" onClick={logoutClicked}>
+          Logout
+        </Button>
+      )}
+      <Dialog open={open} onClose={() => setOpen(false)}>
+        <DialogTitle>Login</DialogTitle>
+        <DialogContent>
+          <DialogContentText></DialogContentText>
+          <Button variant="outlined" onClick={googleClicked}>
+            Login with Google account
+          </Button>
+          <br />
+          <TextField
+            autoFocus
+            margin="dense"
+            id="name"
+            label="Email Address"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <TextField
+            margin="dense"
+            id="password"
+            label="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)} color="primary">
+            Cancel
+          </Button>
+          <Button onClick={okClicked} color="primary">
+            Ok
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </div>
+  );
 }
-
-function loginPassword(email, password) {
-  firebase.auth().signInWithEmailAndPassword(email, password).catch(error => {
-    console.log(error.message);
-  });
-}
-
-function logout() {
-  auth.signOut();
-}
-console.log(login, loginPassword);
 
 function PriceChart(props) {
   return (
@@ -439,8 +492,28 @@ function table(com) {
 function App() {
   let [data, setData] = useState(emptyInstrument());
   let [prices, setPrices] = useState([]);
+  let [isLoggedIn, setIsLoggedIn] = useState("");
+  let [loginName, setLoginName] = useState("");
 
   useEffect(() => {
+    auth
+      .getRedirectResult()
+      .then((result) => {
+        console.log("AUTH OK", result);
+      })
+      .catch((error) => {
+        console.log("AUTH ERROR", error);
+      });
+
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        setIsLoggedIn(true);
+        setLoginName(user.email);
+      } else {
+        console.log("NO AUTH");
+      }
+    });
+
     getPrices(758).then((data) => {
       setPrices(data);
     });
@@ -451,8 +524,16 @@ function App() {
 
   return (
     <div className="App">
-      <PriceChart data={prices} />
-      {table(data)}
+      <LoginDialog
+        isLoggedIn={isLoggedIn}
+        loginName={loginName}
+        onLogout={() => {
+          setIsLoggedIn(false);
+          setLoginName("");
+        }}
+      />
+      {isLoggedIn && table(data)}
+      {isLoggedIn && prices.length > 0 && <PriceChart data={prices} />}
     </div>
   );
 }
