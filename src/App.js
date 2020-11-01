@@ -9,6 +9,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogContentText,
+  List,
+  ListItem,
   TextField,
   Table,
   TableBody,
@@ -141,6 +143,18 @@ function PriceChart(props) {
       }}
       rootProps={{ "data-testid": "2" }}
     />
+  );
+}
+
+function TopList(props) {
+  return (
+    <List>
+      {props.data.map((q) => (
+        <ListItem key={q.id} button={true} onClick={(e) => props.onSelect(q.id)}>
+          {q.name}
+        </ListItem>
+      ))}
+    </List>
   );
 }
 
@@ -301,10 +315,22 @@ function getPrices(id) {
   });
 }
 
-function getInstrument(id) {
-  let instrument = { results: [] };
+function getQualityInstruments() {
+  return new Promise((resolve, reject) => {
+    let quality = [];
+    db.ref("quality_instruments").once("value", (snapshot) => {
+      snapshot.forEach((q) => {
+        let instrument = q.val();
+        quality.push({ id: instrument.insId, name: instrument.name });
+      });
+      resolve(quality);
+    });
+  });
+}
 
+function getInstrument(id) {
   let pmeta = new Promise((resolve, reject) => {
+    let instrument = { results: [] };
     db.ref(`borsdata/metadata/instruments/${id}`).once("value", (snapshot) => {
       let obj = snapshot.val();
       instrument.name = obj.name;
@@ -337,6 +363,7 @@ function getInstrument(id) {
   });
 
   return new Promise((resolve, reject) => {
+    let instrument = { results: [] };
     db.ref(`borsdata/instrument/${id}/reports/reportsQuarter`).once(
       "value",
       (snapshot) => {
@@ -398,7 +425,8 @@ function emptyInstrument() {
   };
 }
 
-function table(com) {
+function StockInfoTable(props) {
+  let com = props.data;
   calc(com);
   return (
     <Box width="100%" margin={5}>
@@ -494,6 +522,8 @@ function App() {
   let [prices, setPrices] = useState([]);
   let [isLoggedIn, setIsLoggedIn] = useState("");
   let [loginName, setLoginName] = useState("");
+  let [qualityInstruments, setQualityInstruments] = useState([]);
+  let [selectedInstrument, setSelectedInstrument] = useState(null);
 
   useEffect(() => {
     auth
@@ -514,13 +544,25 @@ function App() {
       }
     });
 
-    getPrices(758).then((data) => {
-      setPrices(data);
-    });
-    getInstrument(758).then((data) => {
-      setData(data);
+    getQualityInstruments().then((data) => {
+      setQualityInstruments(data);
     });
   }, []);
+
+  useEffect(() => {
+    if (selectedInstrument !== null) {
+      getPrices(selectedInstrument).then((data) => {
+        setPrices(data);
+      });
+      getInstrument(selectedInstrument).then((data) => {
+        setData(data);
+      });
+    }
+  }, [selectedInstrument]);
+
+  const back = () => {
+    setSelectedInstrument(null);
+  };
 
   return (
     <div className="App">
@@ -532,8 +574,17 @@ function App() {
           setLoginName("");
         }}
       />
-      {isLoggedIn && table(data)}
-      {isLoggedIn && prices.length > 0 && <PriceChart data={prices} />}
+      {selectedInstrument && isLoggedIn && <Button onClick={back}>Back</Button>}
+      {selectedInstrument && isLoggedIn && <StockInfoTable data={data}/>}
+      {selectedInstrument && isLoggedIn && prices.length > 0 && (
+        <PriceChart data={prices} />
+      )}
+      {selectedInstrument === null && (
+        <TopList
+          data={qualityInstruments}
+          onSelect={(id) => setSelectedInstrument(id)}
+        />
+      )}
     </div>
   );
 }
