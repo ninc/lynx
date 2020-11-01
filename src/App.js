@@ -150,7 +150,11 @@ function TopList(props) {
   return (
     <List>
       {props.data.map((q) => (
-        <ListItem key={q.id} button={true} onClick={(e) => props.onSelect(q.id)}>
+        <ListItem
+          key={q.id}
+          button={true}
+          onClick={(e) => props.onSelect(q.id)}
+        >
           {q.name}
         </ListItem>
       ))}
@@ -192,12 +196,11 @@ const colsSummaryTooltip = [
   "Vinst före räntor och skatter i MSEK (EBIT)",
   "Andel av omsättning som blir kvar för att täcka räntor och skatt samt vinst (rörelseresultat / omsättning). Ger en uppfattning om lönsamhet i företaget.",
   "Förändring av omsättning sedan föregående år",
-  "",
+  "Utdelade kronor per aktie",
 ];
 
 function percent(x) {
-  if (isNaN(x)) return "";
-  if (!isFinite(x)) return "";
+  if (isNaN(x) || !isFinite(x) || x === null) return "";
   return (x * 100).toFixed(2) + "%";
 }
 
@@ -214,15 +217,28 @@ function calc(com) {
     for (let q = 0; q < 5; ++q) {
       r.margin.push(r.ebit[q] / r.revenue[q]);
       r.revenue_growth.push(
-        last ? r.revenue[q] / last.revenue[q] - 1 : undefined
+        last && r.revenue[q] !== null && last.revenue[q] !== null
+          ? r.revenue[q] / last.revenue[q] - 1
+          : null
       );
-      r.ebit_growth.push(last ? r.ebit[q] / last.ebit[q] - 1 : undefined);
-      r.schablon.push((r.result[q] * (1 - tax)) / shares);
+      r.ebit_growth.push(
+        last && r.ebit[q] !== null && last.ebit[q] !== null
+          ? r.ebit[q] / last.ebit[q] - 1
+          : null
+      );
+      r.schablon.push(
+        r.result[q] !== null && shares > 0
+          ? (r.result[q] * (1 - tax)) / shares
+          : null
+      );
     }
   }
 }
 
 function num(n) {
+  if (n === null || isNaN(n) || !isFinite(n)) {
+    return "";
+  }
   return n.toFixed(2);
 }
 
@@ -330,14 +346,14 @@ function getQualityInstruments() {
 
 function getInstrument(id) {
   let pmeta = new Promise((resolve, reject) => {
-    let instrument = { results: [] };
+    let meta = {};
     db.ref(`borsdata/metadata/instruments/${id}`).once("value", (snapshot) => {
       let obj = snapshot.val();
-      instrument.name = obj.name;
-      instrument.shortname = obj.ticker;
-      instrument.isin = obj.isin;
+      meta.name = obj.name;
+      meta.shortname = obj.ticker;
+      meta.isin = obj.isin;
     });
-    resolve(instrument);
+    resolve(meta);
   });
 
   let pyear = new Promise((resolve, reject) => {
@@ -373,10 +389,10 @@ function getInstrument(id) {
           if (result === undefined) {
             result = {
               year: y.year,
-              revenue: [0, 0, 0, 0, 0],
-              ebit: [0, 0, 0, 0, 0],
-              result: [0, 0, 0, 0, 0],
-              eps: [0, 0, 0, 0, 0],
+              revenue: Array.from({ length: 5 }, () => null),
+              ebit: Array.from({ length: 5 }, () => null),
+              result: Array.from({ length: 5 }, () => null),
+              eps: Array.from({ length: 5 }, () => null),
             };
             instrument.results.push(result);
           }
@@ -394,10 +410,10 @@ function getInstrument(id) {
               if (result === undefined) {
                 result = {
                   year: y.year,
-                  revenue: [0, 0, 0, 0, 0],
-                  ebit: [0, 0, 0, 0, 0],
-                  result: [0, 0, 0, 0, 0],
-                  eps: [0, 0, 0, 0, 0],
+                  revenue: Array.from({ length: 5 }, () => null),
+                  ebit: Array.from({ length: 5 }, () => null),
+                  result: Array.from({ length: 5 }, () => null),
+                  eps: Array.from({ length: 5 }, () => null),
                 };
                 instrument.results.push(result);
               }
@@ -427,7 +443,19 @@ function emptyInstrument() {
 
 function StockInfoTable(props) {
   let com = props.data;
+  let r12_eps =
+    com.results.length > 2
+      ? [
+          ...com.results[com.results.length - 2].eps.slice(0, 4),
+          ...com.results[com.results.length - 1].eps.slice(0, 4),
+        ].filter((x) => x !== null).slice(-4).reduce((v, a) => v + a)
+      : 0;
+  let price = props.prices[props.prices.length - 1].close;
+  let date = props.prices[props.prices.length - 1].date;
+  let r12_pe = price / r12_eps;
+
   calc(com);
+
   return (
     <Box width="100%" margin={5}>
       <h2>{com.name}</h2>
@@ -439,6 +467,9 @@ function StockInfoTable(props) {
           : 0}
         M
       </h3>
+      <h3>Pris {date}: {price}</h3>
+      <h3>Vinst/aktie senaste 4 kvartal: {r12_eps}</h3>
+      <h3>PE senaste 4 kvartal: {num(r12_pe)}</h3>
 
       <br />
 
@@ -575,7 +606,7 @@ function App() {
         }}
       />
       {selectedInstrument && isLoggedIn && <Button onClick={back}>Back</Button>}
-      {selectedInstrument && isLoggedIn && <StockInfoTable data={data}/>}
+      {selectedInstrument && isLoggedIn && prices.length > 0 && <StockInfoTable data={data} prices={prices} />}
       {selectedInstrument && isLoggedIn && prices.length > 0 && (
         <PriceChart data={prices} />
       )}
