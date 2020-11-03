@@ -9,8 +9,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogContentText,
-  List,
-  ListItem,
   TextField,
   Table,
   TableBody,
@@ -147,22 +145,45 @@ function PriceChart(props) {
 }
 
 function TopList(props) {
+  const head = [
+    {
+      label: "Name",
+      id: "name",
+      format: (x) => x,
+      click: (q) => props.onSelect(q.id),
+    },
+    { label: "Margin of safety", id: "safety", format: (x) => percent(x) },
+    { label: "PE", id: "r12_pe", format: (x) => num(x) },
+    { label: "Expected PE", id: "expected_pe", format: (x) => num(x) },
+  ];
+
+  const sort = props.data.sort((a, b) => b.safety - a.safety);
+
   return (
-    <List>
-      {props.data.map((q) => (
-        <ListItem
-          key={q.id}
-          button={true}
-          onClick={(e) => props.onSelect(q.id)}
-        >
-          {q.name}
-        </ListItem>
-      ))}
-    </List>
+    <Table size="small">
+      <TableHead>
+        <TableRow>
+          {head.map((h) => (
+            <TableCell key={h.label}>{h.label}</TableCell>
+          ))}
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {sort.map((q) => (
+          <TableRow key={q.name}>
+            {head.map((h) => (
+              <TableCell key={h.label} onClick={h.click ? () => h.click(q) : null}>
+                {h.format(q[h.id])}
+              </TableCell>
+            ))}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
-let db = firebase.database();
+const db = firebase.database();
 
 const cols = ["", "Q1", "Q2", "Q3", "Q4", "Sum"];
 const rows = ["revenue", "ebit", "margin", "result", "schablon", "eps"];
@@ -283,10 +304,34 @@ function getDataSummary(com, r, i) {
   if (i === 5) return r.dividend;
 }
 
+function getRevenueGrowthSinceStart(com) {
+  if (com.results.length < 5) return 0;
+  const last = com.results[com.results.length - 2];
+  const first = com.results[0];
+  const diff = last.year - first.year;
+  return Math.pow(last.revenue[4] / first.revenue[4], 1 / diff) - 1;
+}
+
+function getExpectedPE(com, expectedReturn) {
+  const goal = getRevenueGrowthSinceStart(com) * 100;
+  const revenueLevels = [0, 5, 10, 15, 20, 25];
+  const peTable = {
+    5: [10, 15, 22, 34, 51, 79],
+    10: [8, 11, 15, 22, 32, 48],
+    15: [6, 8, 11, 15, 21, 31],
+    20: [5, 6, 8, 11, 15, 21],
+    25: [4, 5, 6, 8, 11, 15],
+  };
+  const level = revenueLevels.reduce((prev, curr) =>
+    Math.abs(curr - goal) < Math.abs(prev - goal) ? curr : prev
+  );
+  return peTable[expectedReturn][revenueLevels.indexOf(level)];
+}
+
 function getDataGrowth(com, r, i) {
-  let last = com.results[com.results.length - 2];
-  let diff = last.year - r.year;
-  let yindex = com.results.findIndex((f) => f.year === r.year);
+  const last = com.results[com.results.length - 2];
+  const diff = last.year - r.year;
+  const yindex = com.results.findIndex((f) => f.year === r.year);
   if (diff <= 0) return "";
   switch (i) {
     case 0:
@@ -308,11 +353,11 @@ function getDataGrowth(com, r, i) {
   }
 }
 
-function getPrices(id) {
+function getPrices(id, num) {
   return new Promise((resolve, reject) => {
     let prices = [];
     db.ref(`borsdata/instrument/${id}/stock_prices/stockPricesList`)
-      .limitToLast(90)
+      .limitToLast(num)
       .once("value", (snapshot) => {
         snapshot.forEach((child) => {
           let p = child.val();
@@ -331,15 +376,78 @@ function getPrices(id) {
   });
 }
 
+function getPE(id) {
+  return new Promise((resolve, reject) => {
+    db.ref(`borsdata/calc/${id}`).once("value", (snapshot) => {
+      let data = snapshot.val();
+      if (data) resolve(data);
+      else {
+        calcPE(id).then((data) => resolve(data));
+      }
+    });
+  });
+}
+
+function calcPE(id) {
+  let pricePromise = getPrices(id, 1);
+  let instrumentPromise = getInstrument(id);
+
+  return new Promise((resolve, reject) => {
+    const now = new Date().getTime();
+    Promise.all([pricePromise, instrumentPromise]).then((values) => {
+      const price = values[0][0].close;
+      const com = values[1];
+      const r12_eps =
+        com.results.length > 2
+          ? [
+              ...com.results[com.results.length - 2].eps.slice(0, 4),
+              ...com.results[com.results.length - 1].eps.slice(0, 4),
+            ]
+              .filter((x) => x !== null)
+              .slice(-4)
+              .reduce((v, a) => v + a)
+          : 0;
+      const r12_pe = price / r12_eps;
+      const expected_pe = getExpectedPE(com, 10);
+      let safety = 1 - r12_pe / expected_pe;
+      if (safety < 0 || safety > 1)
+        safety = 0;
+
+      const data = {
+        r12_pe: r12_pe,
+        expected_pe: expected_pe,
+        safety: safety,
+        date: now,
+      };
+      db.ref(`borsdata/calc/${id}`).set(data);
+      resolve(data);
+    });
+  });
+}
+
 function getQualityInstruments() {
   return new Promise((resolve, reject) => {
     let quality = [];
+    let promises = [];
     db.ref("quality_instruments").once("value", (snapshot) => {
       snapshot.forEach((q) => {
-        let instrument = q.val();
-        quality.push({ id: instrument.insId, name: instrument.name });
+        const instrument = q.val();
+        promises.push(
+          new Promise((resolve, reject) => {
+            getPE(instrument.insId).then((data) => {
+              resolve({
+                id: instrument.insId,
+                name: instrument.name,
+                ...data,
+              });
+            });
+          })
+        );
       });
-      resolve(quality);
+      Promise.all(promises).then((values) => {
+        quality.push(...values);
+        resolve(quality);
+      });
     });
   });
 }
@@ -448,11 +556,18 @@ function StockInfoTable(props) {
       ? [
           ...com.results[com.results.length - 2].eps.slice(0, 4),
           ...com.results[com.results.length - 1].eps.slice(0, 4),
-        ].filter((x) => x !== null).slice(-4).reduce((v, a) => v + a)
+        ]
+          .filter((x) => x !== null)
+          .slice(-4)
+          .reduce((v, a) => v + a)
       : 0;
-  let price = props.prices[props.prices.length - 1].close;
-  let date = props.prices[props.prices.length - 1].date;
-  let r12_pe = price / r12_eps;
+  const price = props.prices[props.prices.length - 1].close;
+  const date = props.prices[props.prices.length - 1].date;
+  const r12_pe = price / r12_eps;
+  const expected_pe = getExpectedPE(com, 10);
+  const safety = 1 - r12_pe / expected_pe;
+
+  const rev = [...com.results].reverse();
 
   calc(com);
 
@@ -467,9 +582,13 @@ function StockInfoTable(props) {
           : 0}
         M
       </h3>
-      <h3>Pris {date}: {price}</h3>
-      <h3>Vinst/aktie senaste 4 kvartal: {r12_eps}</h3>
+      <h3>
+        Pris {date}: {price}
+      </h3>
+      <h3>Vinst/aktie senaste 4 kvartal: {num(r12_eps)}</h3>
       <h3>PE senaste 4 kvartal: {num(r12_pe)}</h3>
+      <h3>Förväntad PE: {num(expected_pe)}</h3>
+      <h3>Margin of safety: {percent(safety)}</h3>
 
       <br />
 
@@ -519,7 +638,7 @@ function StockInfoTable(props) {
         </Table>
       </TableContainer>
 
-      {com.results.map((r) => (
+      {rev.map((r) => (
         <Box key={r.year}>
           <h2>{r.year}</h2>
           <TableContainer component={Paper}>
@@ -582,7 +701,7 @@ function App() {
 
   useEffect(() => {
     if (selectedInstrument !== null) {
-      getPrices(selectedInstrument).then((data) => {
+      getPrices(selectedInstrument, 30).then((data) => {
         setPrices(data);
       });
       getInstrument(selectedInstrument).then((data) => {
@@ -606,7 +725,9 @@ function App() {
         }}
       />
       {selectedInstrument && isLoggedIn && <Button onClick={back}>Back</Button>}
-      {selectedInstrument && isLoggedIn && prices.length > 0 && <StockInfoTable data={data} prices={prices} />}
+      {selectedInstrument && isLoggedIn && prices.length > 0 && (
+        <StockInfoTable data={data} prices={prices} />
+      )}
       {selectedInstrument && isLoggedIn && prices.length > 0 && (
         <PriceChart data={prices} />
       )}
