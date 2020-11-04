@@ -19,6 +19,7 @@ import {
   Paper,
   Tooltip,
 } from "@material-ui/core";
+import { DataGrid } from "@material-ui/data-grid";
 import firebase from "firebase/app";
 import "firebase/auth";
 import "firebase/database";
@@ -145,44 +146,42 @@ function PriceChart(props) {
 }
 
 function TopList(props) {
-  const head = [
+  const rowSelected = (r) => {
+    props.onSelect(r.data.id);
+  };
+
+  const columns = [
+    { field: "name", headerName: "Name", width: 300 },
     {
-      label: "Name",
-      id: "name",
-      format: (x) => x,
-      click: (q) => props.onSelect(q.id),
+      field: "safety",
+      headerName: "Margin of safety",
+      width: 200,
+      valueFormatter: ({ value }) => percent(value),
     },
-    { label: "Margin of safety", id: "safety", format: (x) => percent(x) },
-    { label: "PE", id: "r12_pe", format: (x) => num(x) },
-    { label: "Expected PE", id: "expected_pe", format: (x) => num(x) },
+    { field: "r12_pe", headerName: "PE", type: "number", width: 200 },
+    {
+      field: "expected_pe",
+      headerName: "Expected PE",
+      type: "number",
+      width: 200,
+    },
   ];
-
-  const sort = props.data.sort((a, b) => b.safety - a.safety);
-
+  const sortModel = [
+    {
+      field: "safety",
+      sort: "desc",
+    },
+  ];
   return (
-    <Table size="small">
-      <TableHead>
-        <TableRow>
-          {head.map((h) => (
-            <TableCell key={h.label}>{h.label}</TableCell>
-          ))}
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {sort.map((q) => (
-          <TableRow key={q.name}>
-            {head.map((h) => (
-              <TableCell
-                key={h.label}
-                onClick={h.click ? () => h.click(q) : null}
-              >
-                {h.format(q[h.id])}
-              </TableCell>
-            ))}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+      <div style={{ height: 1000, width: "100%" }}>
+        <DataGrid
+          autoPageSize
+          sortModel={sortModel}
+          onRowSelected={rowSelected}
+          rows={props.data}
+          columns={columns}
+        />
+      </div>
   );
 }
 
