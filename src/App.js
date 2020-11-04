@@ -172,7 +172,10 @@ function TopList(props) {
         {sort.map((q) => (
           <TableRow key={q.name}>
             {head.map((h) => (
-              <TableCell key={h.label} onClick={h.click ? () => h.click(q) : null}>
+              <TableCell
+                key={h.label}
+                onClick={h.click ? () => h.click(q) : null}
+              >
                 {h.format(q[h.id])}
               </TableCell>
             ))}
@@ -353,192 +356,148 @@ function getDataGrowth(com, r, i) {
   }
 }
 
-function getPrices(id, num) {
-  return new Promise((resolve, reject) => {
-    let prices = [];
-    db.ref(`borsdata/instrument/${id}/stock_prices/stockPricesList`)
-      .limitToLast(num)
-      .once("value", (snapshot) => {
-        snapshot.forEach((child) => {
-          let p = child.val();
-          prices.push({
-            date: p.d,
-            price: p.p,
-            low: p.l,
-            high: p.h,
-            close: p.c,
-            open: p.o,
-            volume: p.v,
-          });
-        });
-        resolve(prices);
-      });
-  });
-}
-
-function getPE(id) {
-  return new Promise((resolve, reject) => {
-    db.ref(`borsdata/calc/${id}`).once("value", (snapshot) => {
-      let data = snapshot.val();
-      if (data) resolve(data);
-      else {
-        calcPE(id).then((data) => resolve(data));
-      }
+async function getPrices(id, num) {
+  let prices = [];
+  let snapshot = await db
+    .ref(`borsdata/instrument/${id}/stock_prices/stockPricesList`)
+    .limitToLast(num)
+    .once("value");
+  snapshot.forEach((child) => {
+    let p = child.val();
+    prices.push({
+      date: p.d,
+      price: p.p,
+      low: p.l,
+      high: p.h,
+      close: p.c,
+      open: p.o,
+      volume: p.v,
     });
   });
+  return prices;
 }
 
-function calcPE(id) {
-  let pricePromise = getPrices(id, 1);
-  let instrumentPromise = getInstrument(id);
+async function getPE(id) {
+  let snapshot = await db.ref(`borsdata/calc/${id}`).once("value");
+  let data = snapshot.val();
+  if (data) return data;
+  else {
+    return await calcPE(id);
+  }
+}
 
-  return new Promise((resolve, reject) => {
-    const now = new Date().getTime();
-    Promise.all([pricePromise, instrumentPromise]).then((values) => {
-      const price = values[0][0].close;
-      const com = values[1];
-      const r12_eps =
-        com.results.length > 2
-          ? [
-              ...com.results[com.results.length - 2].eps.slice(0, 4),
-              ...com.results[com.results.length - 1].eps.slice(0, 4),
-            ]
-              .filter((x) => x !== null)
-              .slice(-4)
-              .reduce((v, a) => v + a)
-          : 0;
-      const r12_pe = price / r12_eps;
-      const expected_pe = getExpectedPE(com, 10);
-      let safety = 1 - r12_pe / expected_pe;
-      if (safety < 0 || safety > 1)
-        safety = 0;
+async function calcPE(id) {
+  const prices = await getPrices(id, 1);
+  const com = await getInstrument(id);
 
-      const data = {
-        r12_pe: r12_pe,
-        expected_pe: expected_pe,
-        safety: safety,
-        date: now,
+  const now = new Date().getTime();
+  const price = prices[0].close;
+  const r12_eps =
+    com.results.length > 2
+      ? [
+          ...com.results[com.results.length - 2].eps.slice(0, 4),
+          ...com.results[com.results.length - 1].eps.slice(0, 4),
+        ]
+          .filter((x) => x !== null)
+          .slice(-4)
+          .reduce((v, a) => v + a)
+      : 0;
+  const r12_pe = price / r12_eps;
+  const expected_pe = getExpectedPE(com, 10);
+  let safety = 1 - r12_pe / expected_pe;
+  if (safety < 0 || safety > 1) safety = 0;
+
+  const data = {
+    r12_pe: r12_pe,
+    expected_pe: expected_pe,
+    safety: safety,
+    date: now,
+  };
+  db.ref(`borsdata/calc/${id}`).set(data);
+  return data;
+}
+
+async function getQualityInstruments() {
+  let promises = [];
+  let snapshot = await db.ref("quality_instruments").once("value");
+  snapshot.forEach((q) => {
+    const instrument = q.val();
+    promises.push(
+      (async () => {
+        const data = await getPE(instrument.insId);
+        return {
+          id: instrument.insId,
+          name: instrument.name,
+          ...data,
+        };
+      })()
+    );
+  });
+  return await Promise.all(promises);
+}
+
+async function getInstrument(id) {
+  let metasnapshot = await db
+    .ref(`borsdata/metadata/instruments/${id}`)
+    .once("value");
+  let metaobj = metasnapshot.val();
+
+  let instrument = {
+    name: metaobj.name,
+    shortname: metaobj.ticker,
+    isin: metaobj.isin,
+    results: [],
+  };
+
+  let yearsnapshot = await db
+    .ref(`borsdata/instrument/${id}/reports/reportsYear`)
+    .once("value");
+
+  yearsnapshot.val().forEach((y) => {
+    let result = instrument.results.find((r) => r.year === y.year);
+    if (result === undefined) {
+      result = {
+        year: y.year,
+        revenue: Array.from({ length: 5 }, () => null),
+        ebit: Array.from({ length: 5 }, () => null),
+        result: Array.from({ length: 5 }, () => null),
+        eps: Array.from({ length: 5 }, () => null),
       };
-      db.ref(`borsdata/calc/${id}`).set(data);
-      resolve(data);
-    });
-  });
-}
-
-function getQualityInstruments() {
-  return new Promise((resolve, reject) => {
-    let quality = [];
-    let promises = [];
-    db.ref("quality_instruments").once("value", (snapshot) => {
-      snapshot.forEach((q) => {
-        const instrument = q.val();
-        promises.push(
-          new Promise((resolve, reject) => {
-            getPE(instrument.insId).then((data) => {
-              resolve({
-                id: instrument.insId,
-                name: instrument.name,
-                ...data,
-              });
-            });
-          })
-        );
-      });
-      Promise.all(promises).then((values) => {
-        quality.push(...values);
-        resolve(quality);
-      });
-    });
-  });
-}
-
-function getInstrument(id) {
-  let pmeta = new Promise((resolve, reject) => {
-    let meta = {};
-    db.ref(`borsdata/metadata/instruments/${id}`).once("value", (snapshot) => {
-      let obj = snapshot.val();
-      meta.name = obj.name;
-      meta.shortname = obj.ticker;
-      meta.isin = obj.isin;
-    });
-    resolve(meta);
+      instrument.results.push(result);
+    }
+    result.dividend = y.dividend;
+    result.revenue[4] = y.revenues;
+    result.ebit[4] = y.operating_Income;
+    result.result[4] = y.profit_Before_Tax;
+    result.eps[4] = y.earnings_Per_Share;
+    result.shares = y.number_Of_Shares;
   });
 
-  let pyear = new Promise((resolve, reject) => {
-    let yearReports = [];
-    db.ref(`borsdata/instrument/${id}/reports/reportsYear`).once(
-      "value",
-      (snapshot) => {
-        let val = snapshot.val();
-        val.forEach((y) => {
-          yearReports.push({
-            year: y.year,
-            dividend: y.dividend,
-            revenue: y.revenues,
-            ebit: y.operating_Income,
-            result: y.profit_Before_Tax,
-            eps: y.earnings_Per_Share,
-            shares: y.number_Of_Shares,
-          });
-        });
-      }
-    );
-    resolve(yearReports);
+  let quartersnapshot = await db
+    .ref(`borsdata/instrument/${id}/reports/reportsQuarter`)
+    .once("value");
+
+  quartersnapshot.val().forEach((y) => {
+    let result = instrument.results.find((r) => r.year === y.year);
+    if (result === undefined) {
+      result = {
+        year: y.year,
+        revenue: Array.from({ length: 5 }, () => null),
+        ebit: Array.from({ length: 5 }, () => null),
+        result: Array.from({ length: 5 }, () => null),
+        eps: Array.from({ length: 5 }, () => null),
+      };
+      instrument.results.push(result);
+    }
+    let q = y.period - 1;
+    result.revenue[q] = y.revenues;
+    result.ebit[q] = y.operating_Income;
+    result.result[q] = y.profit_Before_Tax;
+    result.eps[q] = y.earnings_Per_Share;
   });
 
-  return new Promise((resolve, reject) => {
-    let instrument = { results: [] };
-    db.ref(`borsdata/instrument/${id}/reports/reportsQuarter`).once(
-      "value",
-      (snapshot) => {
-        let val = snapshot.val();
-        val.forEach((y) => {
-          let result = instrument.results.find((r) => r.year === y.year);
-          if (result === undefined) {
-            result = {
-              year: y.year,
-              revenue: Array.from({ length: 5 }, () => null),
-              ebit: Array.from({ length: 5 }, () => null),
-              result: Array.from({ length: 5 }, () => null),
-              eps: Array.from({ length: 5 }, () => null),
-            };
-            instrument.results.push(result);
-          }
-          let q = y.period - 1;
-          result.revenue[q] = y.revenues;
-          result.ebit[q] = y.operating_Income;
-          result.result[q] = y.profit_Before_Tax;
-          result.eps[q] = y.earnings_Per_Share;
-        });
-        pmeta.then((r) => {
-          instrument = { ...instrument, ...r };
-          pyear.then((py) => {
-            py.forEach((y) => {
-              let result = instrument.results.find((r) => r.year === y.year);
-              if (result === undefined) {
-                result = {
-                  year: y.year,
-                  revenue: Array.from({ length: 5 }, () => null),
-                  ebit: Array.from({ length: 5 }, () => null),
-                  result: Array.from({ length: 5 }, () => null),
-                  eps: Array.from({ length: 5 }, () => null),
-                };
-                instrument.results.push(result);
-              }
-              result.dividend = y.dividend;
-              result.revenue[4] = y.revenue;
-              result.ebit[4] = y.ebit;
-              result.result[4] = y.result;
-              result.eps[4] = y.eps;
-              result.shares = y.shares;
-            });
-            instrument.results.sort((a, b) => a.year - b.year);
-            resolve(instrument);
-          });
-        });
-      }
-    );
-  });
+  instrument.results.sort((a, b) => a.year - b.year);
+  return instrument;
 }
 
 function emptyInstrument() {
