@@ -379,7 +379,9 @@ async function getPrices(id, num) {
 async function getPE(id) {
   let snapshot = await db.ref(`borsdata/calc/${id}`).once("value");
   let data = snapshot.val();
-  if (data) return data;
+  const now = new Date().getTime();
+
+  if (data && data.date && (now - data.date) < 12 * 60 * 60 * 1000) return data;
   else {
     return await calcPE(id);
   }
@@ -412,6 +414,7 @@ async function calcPE(id) {
     safety: safety,
     date: now,
   };
+  console.log(`Update ${id}`);
   db.ref(`borsdata/calc/${id}`).set(data);
   return data;
 }
@@ -651,11 +654,15 @@ function App() {
         console.log("NO AUTH");
       }
     });
-
-    getQualityInstruments().then((data) => {
-      setQualityInstruments(data);
-    });
   }, []);
+
+  useEffect(() =>  {
+    if (isLoggedIn) {
+      getQualityInstruments().then((data) => {
+        setQualityInstruments(data);
+      });
+    }
+  }, [isLoggedIn]);
 
   useEffect(() => {
     if (selectedInstrument !== null) {
